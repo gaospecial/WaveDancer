@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>音频可视化器 - Audio Visualizer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            padding: 10px;
+        }
+
+        .container {
+            text-align: center;
+            z-index: 10;
+            max-width: 100%;
+        }
+
+        h1 {
+            color: white;
+            font-size: 1.8rem;
+            margin-bottom: 0.5rem;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        #canvas {
+            border-radius: 15px;
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.3);
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(10px);
+            width: 95vw;
+            max-width: 1400px;
+            height: 70vh;
+            max-height: 800px;
+        }
+
+        .controls {
+            margin-top: 1rem;
+            display: flex;
+            gap: 0.5rem;
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
+            max-width: 1200px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 0.85rem;
+            font-weight: bold;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        #startBtn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 25px;
+        }
+
+        #startBtn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        #startBtn:active {
+            transform: translateY(0);
+        }
+
+        #startBtn.active {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+
+        .mode-btn {
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+            font-size: 0.8rem;
+        }
+
+        .mode-btn:hover {
+            background: white;
+            transform: translateY(-2px);
+        }
+
+        .mode-btn.active {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+        }
+
+        .info {
+            margin-top: 0.5rem;
+            color: white;
+            font-size: 0.75rem;
+            opacity: 0.8;
+        }
+
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 1.3rem;
+            }
+            
+            button {
+                padding: 8px 15px;
+                font-size: 0.75rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎵 音频可视化器</h1>
+        <canvas id="canvas"></canvas>
+        <div class="controls">
+            <button id="startBtn">🎤 启动麦克风</button>
+            <button class="mode-btn active" data-mode="bars">频谱条</button>
+            <button class="mode-btn" data-mode="circle">圆形波</button>
+            <button class="mode-btn" data-mode="wave">波形</button>
+            <button class="mode-btn" data-mode="particles">粒子</button>
+            <button class="mode-btn" data-mode="spiral">螺旋</button>
+            <button class="mode-btn" data-mode="dna">DNA</button>
+            <button class="mode-btn" data-mode="starburst">星爆</button>
+            <button class="mode-btn" data-mode="rings">频谱环</button>
+            <button class="mode-btn" data-mode="waveform3d">3D波形</button>
+            <button class="mode-btn" data-mode="galaxy">星系</button>
+            <button class="mode-btn" data-mode="fireworks">烟花</button>
+            <button class="mode-btn" data-mode="matrix">矩阵</button>
+        </div>
+        <div class="info">
+            <p>点击"启动麦克风"开始 | 支持12种可视化模式</p>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const startBtn = document.getElementById('startBtn');
+        const modeBtns = document.querySelectorAll('.mode-btn');
+
+        let audioContext;
+        let analyser;
+        let microphone;
+        let dataArray;
+        let bufferLength;
+        let isActive = false;
+        let visualMode = 'bars';
+        let particles = [];
+        let rotation = 0;
+
+        // 设置canvas尺寸以匹配显示尺寸
+        function resizeCanvas() {
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+            
+            // 重新绘制背景
+            if (!isActive) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+        }
+
+        // 初始化canvas尺寸
+        resizeCanvas();
+
+        // 监听窗口大小变化
+        window.addEventListener('resize', resizeCanvas);
+
+        // 初始化音频上下文 - 提高精细度
+        async function initAudio() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                microphone = audioContext.createMediaStreamSource(stream);
+                
+                // 提高FFT大小以获得更精细的频率分辨率
+                analyser.fftSize = 4096;
+                analyser.smoothingTimeConstant = 0.8;
+                bufferLength = analyser.frequencyBinCount;
+                dataArray = new Uint8Array(bufferLength);
+                
+                microphone.connect(analyser);
+                
+                isActive = true;
+                startBtn.textContent = '🔴 停止';
+                startBtn.classList.add('active');
+                
+                draw();
+            } catch (err) {
+                alert('无法访问麦克风: ' + err.message);
+                console.error('麦克风访问错误:', err);
+            }
+        }
+
+        // 停止音频
+        function stopAudio() {
+            if (microphone) {
+                microphone.disconnect();
+            }
+            if (audioContext) {
+                audioContext.close();
+            }
+            isActive = false;
+            startBtn.textContent = '🎤 启动麦克风';
+            startBtn.classList.remove('active');
+            
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        // 绘制函数
+        function draw() {
+            if (!isActive) return;
+            
+            requestAnimationFrame(draw);
+            
+            analyser.getByteFrequencyData(dataArray);
+            rotation += 0.005;
+            
+            switch(visualMode) {
+                case 'bars':
+                    drawBars();
+                    break;
+                case 'circle':
+                    drawCircle();
+                    break;
+                case 'wave':
+                    drawWave();
+                    break;
+                case 'particles':
+                    drawParticles();
+                    break;
+                case 'spiral':
+                    drawSpiral();
+                    break;
+                case 'dna':
+                    drawDNA();
+                    break;
+                case 'starburst':
+                    drawStarburst();
+                    break;
+                case 'rings':
+                    drawRings();
+                    break;
+                case 'waveform3d':
+                    drawWaveform3D();
+                    break;
+                case 'galaxy':
+                    drawGalaxy();
+                    break;
+                case 'fireworks':
+                    drawFireworks();
+                    break;
+                case 'matrix':
+                    drawMatrix();
+                    break;
+            }
+        }
+
+        // 频谱条模式 - 更精细
+        function drawBars() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            const bars = 128; // 显示更多频谱条
+            const barWidth = canvas.width / bars;
+            
+            for (let i = 0; i < bars; i++) {
+                const index = Math.floor(i * bufferLength / bars);
+                const barHeight = (dataArray[index] / 255) * canvas.height * 0.85;
+                
+                const hue = (i / bars) * 360;
+                const gradient = ctx.createLinearGradient(0, canvas.height, 0, canvas.height - barHeight);
+                gradient.addColorStop(0, `hsl(${hue}, 100%, 50%)`);
+                gradient.addColorStop(0.5, `hsl(${hue + 30}, 100%, 60%)`);
+                gradient.addColorStop(1, `hsl(${hue + 60}, 100%, 70%)`);
+                
+                ctx.fillStyle = gradient;
+                ctx.fillRect(i * barWidth, canvas.height - barHeight, barWidth - 1, barHeight);
+                
+                // 添加镜像效果
+                ctx.globalAlpha = 0.3;
+                ctx.fillRect(i * barWidth, 0, barWidth - 1, barHeight * 0.3);
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        // 圆形波模式 - 更精细
+        function drawCircle() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const baseRadius = 80;
+            const samples = 256; // 增加采样点
+            
+            // 绘制多层圆形
+            for (let layer = 0; layer < 3; layer++) {
+                ctx.beginPath();
+                
+                for (let i = 0; i < samples; i++) {
+                    const index = Math.floor(i * bufferLength / samples);
+                    const angle = (i / samples) * Math.PI * 2;
+                    const amplitude = dataArray[index] / 255;
+                    const r = baseRadius + amplitude * 120 + layer * 30;
+                    
+                    const x = centerX + Math.cos(angle) * r;
+                    const y = centerY + Math.sin(angle) * r;
+                    
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                
+                ctx.closePath();
+                
+                const hue = (Date.now() / 20 + layer * 40) % 360;
+                ctx.strokeStyle = `hsla(${hue}, 100%, ${60 - layer * 10}%, ${0.8 - layer * 0.2})`;
+                ctx.lineWidth = 2 + layer;
+                ctx.stroke();
+                
+                if (layer === 0) {
+                    const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, baseRadius + 120);
+                    gradient.addColorStop(0, `hsla(${hue}, 100%, 50%, 0.2)`);
+                    gradient.addColorStop(1, `hsla(${hue + 60}, 100%, 50%, 0)`);
+                    ctx.fillStyle = gradient;
+                    ctx.fill();
+                }
+            }
+        }
+
+        // 波形模式 - 更精细，分别显示高中低音
+        function drawWave() {
+            analyser.getByteFrequencyData(dataArray);
+            
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            const samples = 200;
+            const sliceWidth = canvas.width / samples;
+            
+            // 定义频率范围
+            const lowFreqEnd = Math.floor(bufferLength * 0.1);      // 低音: 0-10%
+            const midFreqEnd = Math.floor(bufferLength * 0.4);      // 中音: 10-40%
+            const highFreqEnd = Math.floor(bufferLength * 0.8);     // 高音: 40-80%
+            
+            // 低音波形 (底部)
+            ctx.beginPath();
+            for (let i = 0; i < samples; i++) {
+                const index = Math.floor(i * lowFreqEnd / samples);
+                const amplitude = dataArray[index] / 255;
+                const x = i * sliceWidth;
+                const y = canvas.height * 0.75 + Math.sin(i * 0.05) * amplitude * 60;
+                
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            ctx.strokeStyle = 'hsla(0, 100%, 50%, 0.9)';  // 红色 - 低音
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            
+            // 添加低音标签
+            ctx.fillStyle = 'hsla(0, 100%, 50%, 0.7)';
+            ctx.font = 'bold 14px sans-serif';
+            ctx.fillText('低音 (Bass)', 10, canvas.height * 0.75 - 40);
+            
+            // 中音波形 (中部)
+            ctx.beginPath();
+            for (let i = 0; i < samples; i++) {
+                const index = lowFreqEnd + Math.floor(i * (midFreqEnd - lowFreqEnd) / samples);
+                const amplitude = dataArray[index] / 255;
+                const x = i * sliceWidth;
+                const y = canvas.height * 0.5 + Math.sin(i * 0.08) * amplitude * 70;
+                
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            ctx.strokeStyle = 'hsla(120, 100%, 50%, 0.9)';  // 绿色 - 中音
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            
+            // 添加中音标签
+            ctx.fillStyle = 'hsla(120, 100%, 50%, 0.7)';
+            ctx.fillText('中音 (Mid)', 10, canvas.height * 0.5 - 40);
+            
+            // 高音波形 (顶部)
+            ctx.beginPath();
+            for (let i = 0; i < samples; i++) {
+                const index = midFreqEnd + Math.floor(i * (highFreqEnd - midFreqEnd) / samples);
+                const amplitude = dataArray[index] / 255;
+                const x = i * sliceWidth;
+                const y = canvas.height * 0.25 + Math.sin(i * 0.12) * amplitude * 50;
+                
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            ctx.strokeStyle = 'hsla(240, 100%, 60%, 0.9)';  // 蓝色 - 高音
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            
+            // 添加高音标签
+            ctx.fillStyle = 'hsla(240, 100%, 60%, 0.7)';
+            ctx.fillText('高音 (Treble)', 10, canvas.height * 0.25 - 40);
+            
+            // 添加额外的装饰波形层
+            const hue = (Date.now() / 20) % 360;
+            
+            // 低音装饰层
+            ctx.beginPath();
+            for (let i = 0; i < samples; i++) {
+                const index = Math.floor(i * lowFreqEnd / samples);
+                const amplitude = dataArray[index] / 255;
+                const x = i * sliceWidth;
+                const y = canvas.height * 0.75 + Math.sin(i * 0.05 + 1) * amplitude * 40;
+                
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            ctx.strokeStyle = 'hsla(0, 100%, 50%, 0.4)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // 中音装饰层
+            ctx.beginPath();
+            for (let i = 0; i < samples; i++) {
+                const index = lowFreqEnd + Math.floor(i * (midFreqEnd - lowFreqEnd) / samples);
+                const amplitude = dataArray[index] / 255;
+                const x = i * sliceWidth;
+                const y = canvas.height * 0.5 + Math.sin(i * 0.08 + 1) * amplitude * 50;
+                
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            ctx.strokeStyle = 'hsla(120, 100%, 50%, 0.4)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // 高音装饰层
+            ctx.beginPath();
+            for (let i = 0; i < samples; i++) {
+                const index = midFreqEnd + Math.floor(i * (highFreqEnd - midFreqEnd) / samples);
+                const amplitude = dataArray[index] / 255;
+                const x = i * sliceWidth;
+                const y = canvas.height * 0.25 + Math.sin(i * 0.12 + 1) * amplitude * 35;
+                
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            ctx.strokeStyle = 'hsla(240, 100%, 60%, 0.4)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        // 粒子模式 - 更精细
+        function drawParticles() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            const average = dataArray.reduce((a, b) => a + b) / bufferLength;
+            
+            // 根据音频强度创建粒子
+            if (average > 30 && particles.length < 300) {
+                const count = Math.floor(average / 20);
+                for (let i = 0; i < count; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const speed = Math.random() * 5 + 2;
+                    particles.push({
+                        x: canvas.width / 2,
+                        y: canvas.height / 2,
+                        vx: Math.cos(angle) * speed,
+                        vy: Math.sin(angle) * speed,
+                        size: Math.random() * 4 + 1,
+                        hue: Math.random() * 360,
+                        life: 1,
+                        alpha: Math.random() * 0.5 + 0.5
+                    });
+                }
+            }
+            
+            particles = particles.filter(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= 0.008;
+                p.size *= 0.99;
+                
+                if (p.life > 0) {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                    const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size);
+                    gradient.addColorStop(0, `hsla(${p.hue}, 100%, 60%, ${p.life * p.alpha})`);
+                    gradient.addColorStop(1, `hsla(${p.hue}, 100%, 50%, 0)`);
+                    ctx.fillStyle = gradient;
+                    ctx.fill();
+                    return true;
+                }
+                return false;
+            });
+        }
+
+        // 螺旋模式
+        function drawSpiral() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const samples = 200;
+            
+            ctx.beginPath();
+            
+            for (let i = 0; i < samples; i++) {
+                const index = Math.floor(i * bufferLength / samples);
+                const amplitude = dataArray[index] / 255;
+                const angle = (i / samples) * Math.PI * 6 + rotation;
+                const radius = (i / samples) * 180 + amplitude * 50;
+                
+                const x = centerX + Math.cos(angle) * radius;
+                const y = centerY + Math.sin(angle) * radius;
+                
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+                
+                // 绘制点
+                const hue = (i / samples) * 360;
+                ctx.fillStyle = `hsl(${hue}, 100%, 50%)`;
+                ctx.fillRect(x - 2, y - 2, 4, 4);
+            }
+            
+            const hue = (Date.now() / 20) % 360;
+            ctx.strokeStyle = `hsla(${hue}, 100%, 50%, 0.5)`;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        // DNA双螺旋模式
+        function drawDNA() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            const samples = 150;
+            const spacing = canvas.width / samples;
+            
+            for (let i = 0; i < samples; i++) {
+                const index = Math.floor(i * bufferLength / samples);
+                const amplitude = dataArray[index] / 255;
+                const x = i * spacing;
+                const angle = (i / samples) * Math.PI * 4 + rotation;
+                
+                // 第一条螺旋
+                const y1 = canvas.height / 2 + Math.sin(angle) * (60 + amplitude * 40);
+                const hue1 = (i / samples) * 360;
+                
+                ctx.beginPath();
+                ctx.arc(x, y1, 3 + amplitude * 3, 0, Math.PI * 2);
+                ctx.fillStyle = `hsl(${hue1}, 100%, 50%)`;
+                ctx.fill();
+                
+                // 第二条螺旋
+                const y2 = canvas.height / 2 - Math.sin(angle) * (60 + amplitude * 40);
+                const hue2 = (hue1 + 180) % 360;
+                
+                ctx.beginPath();
+                ctx.arc(x, y2, 3 + amplitude * 3, 0, Math.PI * 2);
+                ctx.fillStyle = `hsl(${hue2}, 100%, 50%)`;
+                ctx.fill();
+                
+                // 连接线
+                if (Math.abs(Math.sin(angle)) < 0.3) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, y1);
+                    ctx.lineTo(x, y2);
+                    ctx.strokeStyle = `hsla(${(hue1 + hue2) / 2}, 100%, 50%, 0.3)`;
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                }
+            }
+        }
+
+        // 星爆模式
+        function drawStarburst() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const rays = 64;
+            
+            for (let i = 0; i < rays; i++) {
+                const index = Math.floor(i * bufferLength / rays);
+                const amplitude = dataArray[index] / 255;
+                const angle = (i / rays) * Math.PI * 2 + rotation;
+                const length = amplitude * 180 + 20;
+                
+                const x = centerX + Math.cos(angle) * length;
+                const y = centerY + Math.sin(angle) * length;
+                
+                const gradient = ctx.createLinearGradient(centerX, centerY, x, y);
+                const hue = (i / rays) * 360;
+                gradient.addColorStop(0, `hsla(${hue}, 100%, 50%, 0.8)`);
+                gradient.addColorStop(1, `hsla(${hue + 60}, 100%, 60%, 0)`);
+                
+                ctx.beginPath();
+                ctx.moveTo(centerX, centerY);
+                ctx.lineTo(x, y);
+                ctx.strokeStyle = gradient;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                // 端点光晕
+                ctx.beginPath();
+                ctx.arc(x, y, 3 + amplitude * 5, 0, Math.PI * 2);
+                ctx.fillStyle = `hsla(${hue}, 100%, 60%, ${amplitude})`;
+                ctx.fill();
+            }
+        }
+
+        // 频谱环模式
+        function drawRings() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const rings = 8;
+            const samples = 128;
+            
+            for (let ring = 0; ring < rings; ring++) {
+                const baseRadius = 30 + ring * 35;
+                
+                ctx.beginPath();
+                
+                for (let i = 0; i <= samples; i++) {
+                    const index = Math.floor((i + ring * 20) * bufferLength / samples) % bufferLength;
+                    const amplitude = dataArray[index] / 255;
+                    const angle = (i / samples) * Math.PI * 2 + rotation * (ring % 2 === 0 ? 1 : -1);
+                    const radius = baseRadius + amplitude * 25;
+                    
+                    const x = centerX + Math.cos(angle) * radius;
+                    const y = centerY + Math.sin(angle) * radius;
+                    
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                
+                ctx.closePath();
+                
+                const hue = (ring / rings) * 360 + (Date.now() / 50) % 360;
+                ctx.strokeStyle = `hsla(${hue}, 100%, 50%, 0.7)`;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+        }
+
+        // 3D波形模式
+        function drawWaveform3D() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            const layers = 10;
+            const samples = 100;
+            
+            for (let layer = 0; layer < layers; layer++) {
+                const z = layer / layers;
+                const scale = 0.5 + z * 0.5;
+                const offsetY = canvas.height * 0.3 + layer * 30;
+                
+                ctx.beginPath();
+                
+                for (let i = 0; i < samples; i++) {
+                    const index = Math.floor((i + layer * 10) * bufferLength / samples) % bufferLength;
+                    const amplitude = dataArray[index] / 255;
+                    const x = (i / samples) * canvas.width;
+                    const y = offsetY + Math.sin(i * 0.1 + rotation * 5) * amplitude * 50 * scale;
+                    
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                
+                const hue = (layer / layers) * 360 + (Date.now() / 30) % 360;
+                const alpha = 0.3 + z * 0.7;
+                ctx.strokeStyle = `hsla(${hue}, 100%, 50%, ${alpha})`;
+                ctx.lineWidth = 2 + z * 2;
+                ctx.stroke();
+            }
+        }
+
+        // 星系模式
+        let stars = [];
+        function drawGalaxy() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const average = dataArray.reduce((a, b) => a + b) / bufferLength;
+            
+            // 创建新星星
+            if (stars.length < 500 && Math.random() < 0.3) {
+                const angle = Math.random() * Math.PI * 2;
+                const distance = Math.random() * 50;
+                stars.push({
+                    angle: angle,
+                    distance: distance,
+                    speed: 0.5 + Math.random() * 1.5,
+                    size: Math.random() * 2 + 1,
+                    hue: Math.random() * 360,
+                    life: 1
+                });
+            }
+            
+            // 更新和绘制星星
+            stars = stars.filter(star => {
+                star.distance += star.speed * (1 + average / 100);
+                star.angle += 0.01;
+                star.life -= 0.003;
+                
+                if (star.life > 0 && star.distance < 400) {
+                    const x = centerX + Math.cos(star.angle) * star.distance;
+                    const y = centerY + Math.sin(star.angle) * star.distance;
+                    
+                    ctx.beginPath();
+                    ctx.arc(x, y, star.size, 0, Math.PI * 2);
+                    ctx.fillStyle = `hsla(${star.hue}, 100%, 60%, ${star.life})`;
+                    ctx.fill();
+                    
+                    // 拖尾效果
+                    const prevX = centerX + Math.cos(star.angle) * (star.distance - star.speed * 3);
+                    const prevY = centerY + Math.sin(star.angle) * (star.distance - star.speed * 3);
+                    ctx.beginPath();
+                    ctx.moveTo(prevX, prevY);
+                    ctx.lineTo(x, y);
+                    ctx.strokeStyle = `hsla(${star.hue}, 100%, 60%, ${star.life * 0.5})`;
+                    ctx.lineWidth = star.size * 0.5;
+                    ctx.stroke();
+                    
+                    return true;
+                }
+                return false;
+            });
+            
+            // 绘制中心光晕
+            const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, 100);
+            gradient.addColorStop(0, `hsla(${(Date.now() / 20) % 360}, 100%, 50%, ${average / 500})`);
+            gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        // 烟花模式 - 优化版：更容易触发，更多烟花
+        let fireworks = [];
+        function drawFireworks() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            const average = dataArray.reduce((a, b) => a + b) / bufferLength;
+            
+            // 创建新烟花 - 降低触发阈值，适中的触发概率
+            if (average > 20 && Math.random() < 0.1) {
+                // 每次创建2-4个烟花
+                const fireworkCount = Math.floor(Math.random() * 3) + 2;
+                
+                for (let fw = 0; fw < fireworkCount; fw++) {
+                    const x = Math.random() * canvas.width;
+                    const y = canvas.height * 0.2 + Math.random() * canvas.height * 0.4;
+                    const hue = Math.random() * 360;
+                    const particleCount = 40 + Math.floor(average / 3); // 增加粒子数
+                    
+                    for (let i = 0; i < particleCount; i++) {
+                        const angle = (i / particleCount) * Math.PI * 2;
+                        const speed = 2 + Math.random() * 5; // 增加速度范围
+                        fireworks.push({
+                            x: x,
+                            y: y,
+                            vx: Math.cos(angle) * speed,
+                            vy: Math.sin(angle) * speed,
+                            size: 2 + Math.random() * 4, // 增加粒子大小
+                            hue: hue + Math.random() * 60 - 30,
+                            life: 1,
+                            gravity: 0.08 // 稍微降低重力，让烟花飞得更高
+                        });
+                    }
+                }
+            }
+            
+            // 更新和绘制烟花粒子
+            fireworks = fireworks.filter(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += p.gravity;
+                p.life -= 0.01;
+                p.size *= 0.98;
+                
+                if (p.life > 0) {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                    const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size);
+                    gradient.addColorStop(0, `hsla(${p.hue}, 100%, 60%, ${p.life})`);
+                    gradient.addColorStop(1, `hsla(${p.hue}, 100%, 50%, 0)`);
+                    ctx.fillStyle = gradient;
+                    ctx.fill();
+                    
+                    // 拖尾
+                    ctx.beginPath();
+                    ctx.moveTo(p.x, p.y);
+                    ctx.lineTo(p.x - p.vx * 2, p.y - p.vy * 2);
+                    ctx.strokeStyle = `hsla(${p.hue}, 100%, 60%, ${p.life * 0.5})`;
+                    ctx.lineWidth = p.size * 0.5;
+                    ctx.stroke();
+                    
+                    return true;
+                }
+                return false;
+            });
+        }
+
+        // 矩阵模式
+        let matrixColumns = [];
+        function drawMatrix() {
+            if (matrixColumns.length === 0) {
+                const columnCount = Math.floor(canvas.width / 20);
+                for (let i = 0; i < columnCount; i++) {
+                    matrixColumns.push({
+                        x: i * 20,
+                        y: Math.random() * canvas.height,
+                        speed: 2 + Math.random() * 5,
+                        chars: []
+                    });
+                }
+            }
+            
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.font = '16px monospace';
+            
+            matrixColumns.forEach((col, index) => {
+                const dataIndex = Math.floor(index * bufferLength / matrixColumns.length);
+                const amplitude = dataArray[dataIndex] / 255;
+                
+                col.y += col.speed * (0.5 + amplitude);
+                
+                if (col.y > canvas.height) {
+                    col.y = -20;
+                    col.chars = [];
+                }
+                
+                // 添加新字符
+                if (Math.random() < 0.3) {
+                    col.chars.push({
+                        char: String.fromCharCode(0x30A0 + Math.random() * 96),
+                        y: col.y,
+                        brightness: 1
+                    });
+                }
+                
+                // 绘制字符
+                col.chars = col.chars.filter(char => {
+                    char.brightness -= 0.02;
+                    
+                    if (char.brightness > 0) {
+                        const hue = 120 + amplitude * 60;
+                        ctx.fillStyle = `hsla(${hue}, 100%, ${50 + amplitude * 30}%, ${char.brightness})`;
+                        ctx.fillText(char.char, col.x, char.y);
+                        return true;
+                    }
+                    return false;
+                });
+            });
+        }
+
+        // 事件监听
+        startBtn.addEventListener('click', () => {
+            if (!isActive) {
+                initAudio();
+            } else {
+                stopAudio();
+            }
+        });
+
+        modeBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                modeBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                visualMode = btn.dataset.mode;
+                particles = [];
+            });
+        });
+
+    </script>
+</body>
+</html>
