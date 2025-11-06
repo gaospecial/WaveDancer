@@ -21,6 +21,8 @@ WaveDancer 是一个基于 Web Audio API 的实时音频可视化工具。它能
 - 🎯 **高性能**：使用 Canvas 和 Web Audio API，流畅如丝
 - 🌈 **渐变色彩**：动态色彩系统，让每一帧都是艺术
 
+[点击这里在线体验](https://gaospecial.github.io/WaveDancer/audio-visualizer.html)
+
 ## 🎪 12种可视化模式展示
 
 ### 1️⃣ 频谱条 (Bars)
@@ -91,7 +93,7 @@ cd WaveDancer
 
 访问 GitHub Pages（如果已部署）：
 ```
-https://gaospecial.github.io/WaveDancer/
+https://gaospecial.github.io/WaveDancer/audio-visualizer.html
 ```
 
 ## 🎮 使用指南
